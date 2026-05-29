@@ -1,62 +1,41 @@
 import sys
-import sqlite3
 import json
 import re
+from db_helper import get_connection
 
 # Set stdout to UTF-8 to prevent encoding errors on Windows terminal
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
 # ============================================================================
-# 역할: 구축된 DB 설계와 184개 규칙 데이터가 실제 규칙 엔진처럼 빈틈없이 작동하는지 사전 유효성을 자동 검증하는 코드입니다.
-# 내용: [오직 희망하우징 12대 타겟 전용] 성별 불일치 결격, 대학원생 배제, 자동차 무소유, 자산 한도 등 실물 시나리오를 검증합니다.
+# 역할: 구축된 MySQL DB 설계와 272개 규칙 데이터가 실제 규칙 엔진처럼 빈틈없이 작동하는지 유효성을 검증하는 코드입니다.
+# 내용: [오직 희망하우징 12대 타겟 전용] 성별 불일치 결격, 대학원생 배제, 자동차 무소유, 자산 한도 등 실물 시나리오를 MySQL과 연동해 실시간 검증합니다.
 # ============================================================================
 
-def setup_database(db_path, schema_path, insert_path):
-    print("Setting up temporary SQLite database for Hope Housing...")
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    
-    # 1. Execute Schema SQL
-    with open(schema_path, "r", encoding="utf-8") as f:
-        schema_sql = f.read()
-        schema_sql = schema_sql.replace("id BIGINT AUTO_INCREMENT PRIMARY KEY", "id INTEGER PRIMARY KEY AUTOINCREMENT")
-        cursor.executescript(schema_sql)
-    print("  [Success] Database schema built.")
-    
-    # 2. Execute Insert SQL
-    with open(insert_path, "r", encoding="utf-8") as f:
-        insert_sql = f.read()
-        insert_sql = insert_sql.replace("INSERT IGNORE INTO", "INSERT OR IGNORE INTO")
-        insert_sql = insert_sql.replace("ON DUPLICATE KEY UPDATE title=VALUES(title)", "ON CONFLICT(id) DO UPDATE SET title=excluded.title")
-        insert_sql = insert_sql.replace("ON DUPLICATE KEY UPDATE name=VALUES(name)", "ON CONFLICT(id) DO UPDATE SET name=excluded.name")
-        cursor.executescript(insert_sql)
-    print("  [Success] Seed Hope Housing rules data inserted.")
-    
-    conn.commit()
-    return conn
-
 def load_rules_for_target(conn, target_id):
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT rule_name, field, operator, value, is_mandatory, rule_type, description, error_message
-        FROM eligibility_rule
-        WHERE target_id = ?
-    """, (target_id,))
-    
-    rules = []
-    for row in cursor.fetchall():
-        rules.append({
-            "rule_name": row[0],
-            "field": row[1],
-            "operator": row[2],
-            "value": row[3],
-            "is_mandatory": bool(row[4]),
-            "rule_type": row[5],
-            "description": row[6],
-            "error_message": row[7]
-        })
-    return rules
+    """
+    MySQL 데이터베이스에서 해당 Target ID에 할당된 룰셋을 실시간 로드합니다.
+    """
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT rule_name, field, operator, value, is_mandatory, rule_type, description, error_message
+            FROM eligibility_rule
+            WHERE target_id = %s
+        """, (target_id,))
+        
+        rules = []
+        for row in cursor.fetchall():
+            rules.append({
+                "rule_name": row["rule_name"],
+                "field": row["field"],
+                "operator": row["operator"],
+                "value": row["value"],
+                "is_mandatory": bool(row["is_mandatory"]),
+                "rule_type": row["rule_type"],
+                "description": row["description"],
+                "error_message": row["error_message"]
+            })
+        return rules
 
 def get_nested_value(data, path):
     parts = path.split('.')
@@ -150,15 +129,10 @@ def run_eligibility_check(applicant_name, fact, rules):
     return passed_all, scoring_points
 
 if __name__ == "__main__":
-    import os
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    db_path = ":memory:"
-    schema_path = os.path.join(script_dir, "schema.sql")
-    insert_path = os.path.join(script_dir, "../data/processed/insert_rules.sql")
-    
+    print("MySQL 데이터베이스 연결 중...")
     try:
-        conn = setup_database(db_path, schema_path, insert_path)
+        conn = get_connection()
+        print("[성공] MySQL에 성공적으로 연결되었습니다.")
         
         # ----------------------------------------------------
         # Scenario 1: 연남공공원룸텔(임대) 남성 3순위 자격 검증 (SH_2025_HOPE_HOUSING_01_YN_MAL_PRI3)
@@ -302,10 +276,7 @@ if __name__ == "__main__":
         run_eligibility_check("정릉 여성 기숙사 1순위 수급자 + 한부모가족 + 부모 무주택 충족 지원자 (합격, 가점 8점)", applicant_both, rules_pri1)
         
         conn.close()
-        print("\nTemporary in-memory test database cleaned up.")
+        print("\nMySQL dynamic rule evaluation completed successfully.")
             
-    except FileNotFoundError as e:
-        print(f"\n[오류] 필요한 SQL 파일을 찾을 수 없습니다. extract_rules.py를 먼저 실행하여 insert_rules.sql을 만들어야 합니다: {e}")
     except Exception as e:
         print(f"\n[오류] 테스트 중 문제 발생: {e}")
-

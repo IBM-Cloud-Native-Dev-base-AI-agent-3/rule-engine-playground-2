@@ -1,39 +1,26 @@
-import sqlite3
-import pandas as pd
+import os
 import re
+import pandas as pd
+from db_helper import get_connection
 
 # ============================================================================
 # 역할: 전체 규칙 데이터를 깔끔하고 가독성 높은 Excel 파일로 생성하는 스크립트입니다.
-# 내용: schema.sql과 insert_rules.sql을 연동하여 바탕화면에 all_rules.xlsx 파일을 포맷에 맞춰 자동 빌드합니다.
+# 내용: 로컬 MySQL(rule_engine) 실시간 데이터를 연동하여 all_rules.xlsx 파일을 포맷에 맞춰 자동 빌드합니다.
 # ============================================================================
 
-import os
-
 def export_to_excel():
-    print("Excel 내보내기 작업을 시작합니다...")
+    print("MySQL 연동 Excel 내보내기 작업을 시작합니다...")
     
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    schema_path = os.path.join(script_dir, "schema.sql")
-    insert_path = os.path.join(script_dir, "../data/processed/insert_rules.sql")
     
-    # 1. Connect to SQLite in-memory DB (독립적 구동 환경 확보)
-    conn = sqlite3.connect(":memory:")
-    cursor = conn.cursor()
-    
-    # 2. Load schema and seed data (MySQL 문법을 SQLite 용으로 실시간 변환)
-    with open(schema_path, "r", encoding="utf-8") as f:
-        schema_sql = f.read()
-        schema_sql = schema_sql.replace("id BIGINT AUTO_INCREMENT PRIMARY KEY", "id INTEGER PRIMARY KEY AUTOINCREMENT")
-        cursor.executescript(schema_sql)
+    # 1. Connect to live local MySQL
+    try:
+        conn = get_connection()
+    except Exception as e:
+        print(f"[오류] MySQL 데이터베이스 연결 실패: {e}")
+        return
         
-    with open(insert_path, "r", encoding="utf-8") as f:
-        insert_sql = f.read()
-        insert_sql = insert_sql.replace("INSERT IGNORE INTO", "INSERT OR IGNORE INTO")
-        insert_sql = insert_sql.replace("ON DUPLICATE KEY UPDATE title=VALUES(title)", "ON CONFLICT(id) DO UPDATE SET title=excluded.title")
-        insert_sql = insert_sql.replace("ON DUPLICATE KEY UPDATE name=VALUES(name)", "ON CONFLICT(id) DO UPDATE SET name=excluded.name")
-        cursor.executescript(insert_sql)
-        
-    # 3. Query the fully joined dataset using Pandas (한글 컬럼 매핑)
+    # 2. Query the fully joined dataset using Pandas (한글 컬럼 매핑)
     query = """
     SELECT 
         c.name AS '대분류',
@@ -53,9 +40,14 @@ def export_to_excel():
     ORDER BY c.code, a.id, t.id, r.is_mandatory DESC, r.id;
     """
     
-    df = pd.read_sql_query(query, conn)
-    
-    # 4. Post-process the DataFrame to make it extremely beautiful and professional
+    try:
+        df = pd.read_sql_query(query, conn)
+    except Exception as e:
+        print(f"[오류] 데이터 쿼리 실패: {e}")
+        conn.close()
+        return
+        
+    # 3. Post-process the DataFrame to make it extremely beautiful and professional
     df['배점'] = '-'
     
     for idx, row in df.iterrows():
@@ -77,18 +69,20 @@ def export_to_excel():
     ]
     df = df[columns_order]
     
-    # 5. Write to a beautiful Excel file with openpyxl
+    # 4. Write to a beautiful Excel file with openpyxl
     excel_path = os.path.join(script_dir, "../data/processed/all_rules.xlsx")
     
     try:
         write_excel(df, excel_path)
-        print(f"\n[성공] 엑셀 파일이 성공적으로 생성되었습니다: {excel_path}")
+        print(f"\n[성공] MySQL 라이브 규칙 데이터가 엑셀 파일로 생성되었습니다: {excel_path}")
     except PermissionError:
         alternative_path = os.path.join(script_dir, "../data/processed/all_rules_new.xlsx")
-        print(f"\n[Warning] {excel_path} 파일이 현재 다른 프로그램(엑셀 등)에 의해 열려 있어 락(Lock) 상태입니다.")
+        print(f"\n[Warning] {excel_path} 파일이 현재 다른 프로그램에 의해 열려 있어 락(Lock) 상태입니다.")
         print(f"대신 새로운 파일 이름으로 저장합니다: {alternative_path}")
         write_excel(df, alternative_path)
         print(f"[성공] 엑셀 파일이 성공적으로 생성되었습니다: {alternative_path}")
+    except Exception as e:
+        print(f"[오류] 엑셀 쓰기 에러 발생: {e}")
         
     conn.close()
 
@@ -107,11 +101,10 @@ def write_excel(df, path):
                 korean_count = len(re.findall(r'[가-힣]', val))
                 actual_width = len(val) + korean_count  # 한글 가중치 적용
                 if actual_width > max_len:
-                     max_len = actual_width
+                      max_len = actual_width
             
             col_letter = col[0].column_letter
             worksheet.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
 if __name__ == "__main__":
     export_to_excel()
-
