@@ -5,11 +5,11 @@ from db_helper import get_connection
 
 # ============================================================================
 # 역할: 전체 규칙 데이터를 깔끔하고 가독성 높은 Excel 파일로 생성하는 스크립트입니다.
-# 내용: 로컬 MySQL(rule_engine) 실시간 데이터를 연동하여 all_rules.xlsx 파일을 포맷에 맞춰 자동 빌드합니다.
+# 내용: 로컬 MySQL(rule_engine) 데이터를 가져와 가독성이 개선된 전형명 컬럼을 추가해 엑셀로 내보냅니다.
 # ============================================================================
 
 def export_to_excel():
-    print("MySQL 연동 Excel 내보내기 작업을 시작합니다...")
+    print("MySQL 연동 가독성 개선형 Excel 내보내기 작업을 시작합니다...")
     
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
@@ -21,8 +21,10 @@ def export_to_excel():
         return
         
     # 2. Query the fully joined dataset using Pandas (한글 컬럼 매핑)
+    # r.target_id를 함께 조회하여 파이썬 단에서 한글 번역명으로 매핑합니다.
     query = """
     SELECT 
+        r.target_id AS '타겟 ID',
         c.name AS '대분류',
         a.title AS '공고문 제목',
         t.name AS '세부 모집 상품명',
@@ -41,13 +43,35 @@ def export_to_excel():
     """
     
     try:
-        df = pd.read_sql_query(query, conn)
+        with conn.cursor() as cursor:
+            cursor.execute(query)
+            rows = cursor.fetchall()
+        df = pd.DataFrame(rows)
     except Exception as e:
         print(f"[오류] 데이터 쿼리 실패: {e}")
         conn.close()
         return
         
-    # 3. Post-process the DataFrame to make it extremely beautiful and professional
+    # 3. Target ID 한글 번역 매핑 매칭
+    target_mapping = {
+        "SH_2025_HOPE_HOUSING_01_YN_FEM_PRI1": "연남 여성 1순위 전형",
+        "SH_2025_HOPE_HOUSING_01_YN_FEM_PRI2": "연남 여성 2순위 전형",
+        "SH_2025_HOPE_HOUSING_01_YN_FEM_PRI3": "연남 여성 3순위 전형",
+        "SH_2025_HOPE_HOUSING_01_YN_MAL_PRI1": "연남 남성 1순위 전형",
+        "SH_2025_HOPE_HOUSING_01_YN_MAL_PRI2": "연남 남성 2순위 전형",
+        "SH_2025_HOPE_HOUSING_01_YN_MAL_PRI3": "연남 남성 3순위 전형",
+        "SH_2025_HOPE_HOUSING_01_JR_FEM_PRI1": "정릉 여성 1순위 전형",
+        "SH_2025_HOPE_HOUSING_01_JR_FEM_PRI2": "정릉 여성 2순위 전형",
+        "SH_2025_HOPE_HOUSING_01_JR_FEM_PRI3": "정릉 여성 3순위 전형",
+        "SH_2025_HOPE_HOUSING_01_JR_MAL_PRI1": "정릉 남성 1순위 전형",
+        "SH_2025_HOPE_HOUSING_01_JR_MAL_PRI2": "정릉 남성 2순위 전형",
+        "SH_2025_HOPE_HOUSING_01_JR_MAL_PRI3": "정릉 남성 3순위 전형",
+    }
+    
+    # '모집 전형' 신규 컬럼 매핑 추가
+    df['모집 전형'] = df['타겟 ID'].map(target_mapping).fillna(df['타겟 ID'])
+    
+    # 4. Post-process the DataFrame to make it extremely beautiful and professional
     df['배점'] = '-'
     
     for idx, row in df.iterrows():
@@ -62,19 +86,19 @@ def export_to_excel():
         if row['구분'] == '가점':
             df.at[idx, '탈락 메시지'] = '-'
             
-    # Reorder columns to place '배점' right after '구분' for perfect readability
+    # Reorder columns to place '모집 전형' at the very first index
     columns_order = [
-        '대분류', '공고문 제목', '세부 모집 상품명', '구분', '배점',
+        '모집 전형', '대분류', '공고문 제목', '세부 모집 상품명', '구분', '배점',
         '규칙명', '평가 변수', '연산자', '기준값', '상세 조건 설명', '탈락 메시지'
     ]
     df = df[columns_order]
     
-    # 4. Write to a beautiful Excel file with openpyxl
+    # 5. Write to a beautiful Excel file with openpyxl
     excel_path = os.path.join(script_dir, "../data/processed/all_rules.xlsx")
     
     try:
         write_excel(df, excel_path)
-        print(f"\n[성공] MySQL 라이브 규칙 데이터가 엑셀 파일로 생성되었습니다: {excel_path}")
+        print(f"\n[성공] 가독성 개선 컬럼이 포함된 엑셀 파일이 갱신되었습니다: {excel_path}")
     except PermissionError:
         alternative_path = os.path.join(script_dir, "../data/processed/all_rules_new.xlsx")
         print(f"\n[Warning] {excel_path} 파일이 현재 다른 프로그램에 의해 열려 있어 락(Lock) 상태입니다.")
