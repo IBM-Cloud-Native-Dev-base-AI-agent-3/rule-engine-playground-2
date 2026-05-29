@@ -7,20 +7,26 @@ import re
 # 내용: schema.sql과 insert_rules.sql을 연동하여 바탕화면에 all_rules.xlsx 파일을 포맷에 맞춰 자동 빌드합니다.
 # ============================================================================
 
+import os
+
 def export_to_excel():
     print("Excel 내보내기 작업을 시작합니다...")
+    
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    schema_path = os.path.join(script_dir, "schema.sql")
+    insert_path = os.path.join(script_dir, "../data/processed/insert_rules.sql")
     
     # 1. Connect to SQLite in-memory DB (독립적 구동 환경 확보)
     conn = sqlite3.connect(":memory:")
     cursor = conn.cursor()
     
     # 2. Load schema and seed data (MySQL 문법을 SQLite 용으로 실시간 변환)
-    with open("schema.sql", "r", encoding="utf-8") as f:
+    with open(schema_path, "r", encoding="utf-8") as f:
         schema_sql = f.read()
         schema_sql = schema_sql.replace("id BIGINT AUTO_INCREMENT PRIMARY KEY", "id INTEGER PRIMARY KEY AUTOINCREMENT")
         cursor.executescript(schema_sql)
         
-    with open("insert_rules.sql", "r", encoding="utf-8") as f:
+    with open(insert_path, "r", encoding="utf-8") as f:
         insert_sql = f.read()
         insert_sql = insert_sql.replace("INSERT IGNORE INTO", "INSERT OR IGNORE INTO")
         insert_sql = insert_sql.replace("ON DUPLICATE KEY UPDATE title=VALUES(title)", "ON CONFLICT(id) DO UPDATE SET title=excluded.title")
@@ -72,13 +78,13 @@ def export_to_excel():
     df = df[columns_order]
     
     # 5. Write to a beautiful Excel file with openpyxl
-    excel_path = "all_rules.xlsx"
+    excel_path = os.path.join(script_dir, "../data/processed/all_rules.xlsx")
     
     try:
         write_excel(df, excel_path)
         print(f"\n[성공] 엑셀 파일이 성공적으로 생성되었습니다: {excel_path}")
     except PermissionError:
-        alternative_path = "all_rules_new.xlsx"
+        alternative_path = os.path.join(script_dir, "../data/processed/all_rules_new.xlsx")
         print(f"\n[Warning] {excel_path} 파일이 현재 다른 프로그램(엑셀 등)에 의해 열려 있어 락(Lock) 상태입니다.")
         print(f"대신 새로운 파일 이름으로 저장합니다: {alternative_path}")
         write_excel(df, alternative_path)

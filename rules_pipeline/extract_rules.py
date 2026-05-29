@@ -400,7 +400,7 @@ def scan_and_generate_sql(root_dir, sql_output_path):
                 "category_code": category_code,
                 "title": extracted_title,
                 "publish_date": f"{year}-11-27",
-                "file_path": f"sh(rules)/{category_folder}/{file}"
+                "file_path": f"data/raw_pdf/{category_folder}/{file}"
             })
             
             for target in targets_dict:
@@ -485,6 +485,6 @@ def scan_and_generate_sql(root_dir, sql_output_path):
 
 if __name__ == "__main__":
     scan_and_generate_sql(
-        root_dir=r"C:\Users\hi\Desktop\rule-engine-playground-2\sh(rules)",
-        sql_output_path=r"C:\Users\hi\Desktop\rule-engine-playground-2\insert_rules.sql"
+        root_dir=r"C:\Users\hi\Desktop\rule-engine-playground-2\data\raw_pdf",
+        sql_output_path=r"C:\Users\hi\Desktop\rule-engine-playground-2\data\processed\insert_rules.sql"
     )

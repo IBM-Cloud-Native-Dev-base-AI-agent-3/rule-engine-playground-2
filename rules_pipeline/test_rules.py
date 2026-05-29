@@ -150,9 +150,12 @@ def run_eligibility_check(applicant_name, fact, rules):
     return passed_all, scoring_points
 
 if __name__ == "__main__":
+    import os
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
     db_path = ":memory:"
-    schema_path = "schema.sql"
-    insert_path = "insert_rules.sql"
+    schema_path = os.path.join(script_dir, "schema.sql")
+    insert_path = os.path.join(script_dir, "../data/processed/insert_rules.sql")
     
     try:
         conn = setup_database(db_path, schema_path, insert_path)
